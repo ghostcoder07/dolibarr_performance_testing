@@ -1,0 +1,106 @@
+services:
+  dolibarr-db:
+    image: mysql:8.0
+    container_name: dolibarr_mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: root_password
+      MYSQL_DATABASE: dolibarr
+      MYSQL_USER: dolibarr_user
+      MYSQL_PASSWORD: dolibarr_pass
+    volumes:
+      - dolibarr_db_data:/var/lib/mysql
+      - ./mysql/init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "3306:3306"
+    networks:
+      - dolibarr_network
+    command: --default-authentication-plugin=mysql_native_password
+
+  dolibarr:
+    image: dolibarr/dolibarr:latest
+    container_name: dolibarr_app
+    environment:
+      DOLI_DB_HOST: dolibarr-db
+      DOLI_DB_NAME: dolibarr
+      DOLI_DB_USER: dolibarr_user
+      DOLI_DB_PASSWORD: dolibarr_pass
+      DOLI_URL_ROOT: http://localhost:8080
+      DOLI_ADMIN_LOGIN: admin
+      DOLI_ADMIN_PASSWORD: admin123
+    ports:
+      - "8080:80"
+    depends_on:
+      - dolibarr-db
+    networks:
+      - dolibarr_network
+    volumes:
+      - dolibarr_data:/var/www/html
+      - ./dolibarr/conf:/var/www/html/conf
+
+  influxdb:
+    image: influxdb:1.8
+    container_name: influxdb
+    environment:
+      INFLUXDB_DB: k6
+      INFLUXDB_USER: k6
+      INFLUXDB_USER_PASSWORD: k6
+    ports:
+      - "8086:8086"
+    volumes:
+      - influxdb_data:/var/lib/influxdb2
+    networks:
+      - dolibarr_network
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin123
+      GF_INSTALL_PLUGINS: ""
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+      - ./grafana/dashboards:/var/lib/grafana/dashboards
+    depends_on:
+      - influxdb
+    networks:
+      - dolibarr_network
+
+  k6:
+    image: grafana/k6:latest
+    container_name: k6_runner
+    environment:
+      K6_OUT:  influxdb=http://influxdb:8086/k6
+    volumes:
+      - ./k6:/scripts
+    depends_on:
+      - dolibarr
+      - influxdb
+    networks:
+      - dolibarr_network
+    profiles:
+      - testing
+
+  nginx:
+    image: nginx:alpine
+    container_name: nginx_lb
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+    depends_on:
+      - dolibarr
+    networks:
+      - dolibarr_network
+
+volumes:
+  dolibarr_db_data:
+  dolibarr_data:
+  influxdb_data:
+  grafana_data:
+
+networks:
+  dolibarr_network:
+    driver: bridge
